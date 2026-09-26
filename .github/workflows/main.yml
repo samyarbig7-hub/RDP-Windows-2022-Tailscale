@@ -1,0 +1,87 @@
+name: HenMac Sequoia Full (NoMachine Custom Link)
+
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: macos-26-xlarge
+    timeout-minutes: 9999
+
+    steps:
+    - name: Download Assets
+      run: |
+        curl -L -o wallpaper.png https://github.com/arifkembiri/RDP-Windows-2022-Tailscale/blob/main/wallpaper.png?raw=true
+        
+    - name: Install Tailscale
+      run: |
+        brew install tailscale
+        
+    - name: Start and Authenticate Tailscale
+      run: |
+        sudo tailscaled > /dev/null 2>&1 &
+        sleep 5
+        sudo tailscale up
+      env:
+        TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        
+    - name: Create User, Download and Install NoMachine
+      run: |
+        # 1. ساخت کاربر جدید برای لاگین در NoMachine
+        echo "Creating macOS user..."
+        sudo sysadminctl -addUser macadmin -fullName "Mac Admin" -password "MacPass123!" -admin
+        
+        # 2. دانلود NoMachine با لینک مستقیم شما
+        echo "Downloading NoMachine..."
+        curl -L -o nomachine.dmg "https://mac.filehorse.com/download/file/91kFctH3230VQCYSMBV-NJIVeZdrm6xChCcvDg2l4F_m3VzvnyxcfL7-ALTXsLbsb8KNGDB2hikiSFgoH_DH2sIUEggl6GybGToDjyeN4VQ/"
+        
+        
+        # 3. باز کردن فایل و پیدا کردن خودکار نصب‌کننده
+        echo "Mounting and finding the installer..."
+        hdiutil attach nomachine.dmg -mountpoint /Volumes/NoMachine_Mount
+        
+        # جستجو برای پیدا کردن فایل pkg با هر نامی
+        PKG_FILE=$(find /Volumes/NoMachine_Mount -name "*.pkg" -maxdepth 1 | head -n 1)
+        echo "Found installer at: $PKG_FILE"
+        
+        # 4. نصب برنامه
+        sudo installer -pkg "$PKG_FILE" -target /
+        
+        # 5. جدا کردن درایو مجازی
+        hdiutil detach /Volumes/NoMachine_Mount -force || true
+        
+    - name: Grant TCC Permissions (Fix Black Screen for NoMachine)
+      run: |
+        echo "Granting Screen Recording and Accessibility permissions to NoMachine..."
+        sudo killall tccd || true
+        
+        # شناسه برنامه‌های هسته‌ی NoMachine که به مجوز نیاز دارند
+        for app in "com.nomachine.nxdock" "com.nomachine.nxplayer" "com.nomachine.nxserver" "com.nomachine.nxnode"; do
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version) VALUES ('kTCCServiceScreenCapture', '$app', 0, 2, 3, 1);" || true
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version) VALUES ('kTCCServiceAccessibility', '$app', 0, 2, 3, 1);" || true
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version) VALUES ('kTCCServicePostEvent', '$app', 0, 2, 3, 1);" || true
+        done
+        
+        sudo killall tccd || true
+        
+        # راه‌اندازی مجدد سرور NoMachine برای اعمال دسترسی‌ها
+        sudo /etc/NX/nxserver --restart
+        
+        # بیدار نگه داشتن صفحه و ایجاد سشن گرافیکی
+        caffeinate -u -t 2 &
+        
+    - name: Get Tailscale IP and Access Info
+      run: |
+        tailscale_ip=$(sudo tailscale ip -4)
+        echo "========================================================"
+        echo "🚀 Mac Server is Ready! Connect using NoMachine client."
+        echo "========================================================"
+        echo "Tailscale IP: $tailscale_ip"
+        echo "Username:     macadmin"
+        echo "Password:     MacPass123!"
+        echo "Port:         4000 (Default NX Protocol)"
+        echo "========================================================"
+        
+    - name: Successfully made! Keeping the runner alive.
+      run: |
+        while true; do sleep 60; done
+        
